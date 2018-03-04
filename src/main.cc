@@ -20,9 +20,9 @@
 
 /**
  * @file main
- * main prepara el "sensor" de imágenes monocular e inicia el bucle principal, enviando una imagen Mat por vez.
- * Previamente inicializa el sistema al construir el objeto SLAM, pasándole como argumentos las rutas al vocabulario y configuración,
- * y el modo MONOCULAR.
+ * main prepares the monocular image "sensor" and starts the main loop, sending one Mat image at a time.
+ * Previously initializes the system when building the SLAM object, passing as arguments the routes to the vocabulary and configuration,,
+ * and the MONOCULAR mode.
  */
 
 
@@ -50,84 +50,80 @@ ORB_SLAM2::System *Sistema;
 
 int main(int argc, char **argv){
 
-	cout	<< "Iniciando ORB-SLAM.  Línea de comando:" << endl
-			<< "os1 [archivo de configuración yaml [ruta al archivo de video]]\nSin argumentos para usar la webcam, con configuración en webcam.yaml" << endl;
+	cout	<< "Starting ORB-SLAM. Command line:" << endl
+			<< "os1 [yaml configuration file [path to video file]] \ nNo arguments to use webcam, with configuration in webcam.yaml" << endl;
 
-    // Parámetros de la línea de comando
+    // Parameters of the command line
 
     char* rutaConfiguracion = NULL;
     char* rutaVideo = NULL;
-	char archivoConfiguracionWebcamPorDefecto[] = "webcam.yaml";	// Configuración por defecto, para webcam.
+	char archivoConfiguracionWebcamPorDefecto[] = "webcam.yaml";	// Default configuration, for webcam.
 
 	switch(argc){
-	case 1:	// Sin argumentos, webcam por defecto y webcam.yaml como configuración
+	case 1:	// No arguments, default webcam and webcam.yaml as configuration
 		rutaConfiguracion = archivoConfiguracionWebcamPorDefecto;
 		cout << "Sin argumentos, webcam con esta configuración: " << rutaConfiguracion << endl;
 		break;
 
-	case 2:	// Un argumento, archivo de configuración  NO IMPLEMENTADO
+	case 2:	// An argument, configuration file NOT IMPLEMENTED
 		rutaConfiguracion = argv[1];
 		break;
 
-	case 3:	// Dos argumentos, archivo de configuración y ruta de video
+	case 3:	// Two arguments, configuration file and video path
 		rutaConfiguracion = argv[1];
-		rutaVideo = argv[2];	// Segundo argumento
-		cout << "Dos argumentos: " << rutaConfiguracion << ", " << rutaVideo << endl;
+		rutaVideo = argv[2];
+		cout << "Two arguments: " << rutaConfiguracion << ", " << rutaVideo << endl;
 		break;
 
 	}
 
-
-	// Inicializa el sistema SLAM.
-    // Mi versión de archivo binario con el vocabulario, que carga mucho más rápido porque evita el análisis sintáctico.
+	// Initialize the SLAM system.
+    // MMy binary file version with the vocabulary, which loads much faster because it avoids parsing.
     ORB_SLAM2::System SLAM("orbVoc.bin", rutaConfiguracion,ORB_SLAM2::System::MONOCULAR,true);
 
-    // Puntero global al sistema singleton
+    // Global pointer to the singleton system
     Sistema = &SLAM;
 
-    // Imagen de entrada
+    // Entrance image
     cv::Mat im;
 
     ORB_SLAM2::Viewer* visor = SLAM.mpViewer;
 
-    // Arranca el hilo de Video
+    // Start the Video thread
     ORB_SLAM2::Video video;
     new thread(&ORB_SLAM2::Video::Run, &video);
 
-	// Indica si la entrada de video corresponde a un archivo, y por lo tanto su base de tiempo es controlable
+	// Indicates if the video entry corresponds to a file, and therefore its time base is controllable
 	bool videoEsArchivo = rutaVideo;
     if(videoEsArchivo){
 		video.abrirVideo(rutaVideo);
 		visor->setDuracion(video.cantidadCuadros);
 	}else{
-		// No hay parámetros, no hay video, sólo webcam.
+		// There are no parameters, there is no video, only webcam.
 		video.abrirCamara();
 		visor->setDuracion();
 	}
 
-
-
-
     while(true){
 
-        // Leer nuevo cuadro, controlar el tiempo del video
+        // Read new picture, control the time of the video
     	if(video.flujo == ORB_SLAM2::Video::VIDEO || video.flujo == ORB_SLAM2::Video::VIDEO_RT){
     		if(visor->tiempoAlterado){
-				// El usuario movió el trackbar: hay que cambiar el frame.
+				// The user moved the trackbar: you have to change the frame.
 				video.setCuadroPos(visor->tiempo);
-				visor->tiempoAlterado = false;	// Bajar la señal.
+				visor->tiempoAlterado = false;	// Lower the signal.
 			} else if(visor->tiempoReversa && !visor->videoPausado){
-				// La película va marcha atrás
+				// The movie goes backwards
 				if(video.posCuadro<2){
-					// Si llega al inicio del video, recomienza hacia adelante
+					// If you reach the beginning of the video, start again forward
 					video.setCuadroPos(0);
 					visor->tiempoReversa = false;
 				}
 			}
     	}
 
-    	// t1 está en segundos, con doble precisión.  El bucle para inicialización demora entre 1 y 2 centésimas de segundo.
-    	//std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
+    	// t1 is in seconds, with double precision. The loop for initialization takes between 1 and 2 hundredths of a second.
+    	// std::chrono::steady_clock::time_point t1 = std::chrono::steady_clock::now();
 
         // Pass the image to the SLAM system
         if(video.imagenDisponible)
@@ -141,18 +137,18 @@ int main(int argc, char **argv){
 			);
 
 
-    	// Ver si hay señal para cargar el mapa, que debe hacerse desde este thread
+    	// See if there is a signal to load the map, which must be done from this thread
     	if(visor->cargarMapa){
     		visor->cargarMapa = false;
 
-    		// El reset subsiguiente requiere que LocalMapping no esté pausado.
+    		// The subsequent reset requires that LocalMapping is not paused.
     		SLAM.mpLocalMapper->Release();
 
-        	// Limpia el mapa de todos los singletons
+        	// Clean the map of all the singletons
     		SLAM.mpTracker->Reset();
-    		// En este punto el sistema está reseteado.
+    		// At this point the system is reset.
 
-    	    // Espera a que se detenga LocalMapping y  Viewer
+    	    // Wait for LocalMapping and Viewer to stop
     		SLAM.mpLocalMapper->RequestStop();
     		SLAM.mpViewer	  ->RequestStop();
 
@@ -165,7 +161,7 @@ int main(int argc, char **argv){
     			while(!SLAM.mpViewer	 ->isStopped()) usleep(1000);
 
 				std::string nombreArchivo(charchivo);
-				nombreArchivo.pop_back();	// Quita el \n final
+				nombreArchivo.pop_back();	// Remove the final \ n
 				cout << "Abriendo archivo " << nombreArchivo << endl;
 
 				SLAM.serializer->mapLoad(nombreArchivo);
@@ -174,19 +170,19 @@ int main(int argc, char **argv){
         	}
 			SLAM.mpTracker->mState = ORB_SLAM2::Tracking::LOST;
 
-			// Reactiva viewer.  No reactiva el mapeador, pues el sistema queda en sólo tracking luego de cargar.
+			// Reactive viewer. It does not reactivate the mapper, because the system remains in only tracking after loading.
 			SLAM.mpViewer->Release();
 
-			// Por las dudas, es lo que hace Tracking luego que el estado pase a LOST.
-			// Como tiene un mutex, por las dudas lo invoco después de viewer.release.
+			// By the doubts, it is what Tracking does after the state passes to LOST.
+			// Since he has a mutex, just call it after viewer.release.
 			SLAM.mpFrameDrawer->Update(SLAM.mpTracker);
     	}
     	if(visor->guardarMapa){
     		visor->guardarMapa = false;
 
-    	    // Espera a que se detenga LocalMapping
+    	    // Wait for LocalMapping to stop
     		SLAM.mpLocalMapper->RequestStop();
-    		SLAM.mpViewer	  ->RequestStop();	// No parece que sea necesario para guardar, sino sólo para cargar, pues al guardar no se modifica el mapa.
+    		SLAM.mpViewer	  ->RequestStop();	// It does not seem necessary to save, but only to load, because when saving the map is not modified.
 
         	//char archivo[] = "mapa.bin";
         	char charchivo[1024];
@@ -198,19 +194,19 @@ int main(int argc, char **argv){
         		while(!SLAM.mpViewer	 ->isStopped()) usleep(1000);
 
 				std::string nombreArchivo(charchivo);
-				nombreArchivo.pop_back();	// Quita el \n final
+				nombreArchivo.pop_back();	// Remove the final \ n
 				cout << "Guardando archivo " << nombreArchivo << endl;
 
             	SLAM.serializer->mapSave(nombreArchivo);
             	cout << "Mapa guardado." << endl;
         	}
 
-        	// Reactiva viewer.  No reactiva el mapeador, pues el sistema queda en sólo tracking luego de cargar.
+        	// Reactive viewer. It does not reactivate the mapper, because the system remains in only tracking after loading.
         	SLAM.mpViewer->Release();
     	}
 
 
-    	// Abrir un archivo de video
+    	// Open a video file
     	if(visor->abrirVideo){
     		visor->abrirVideo = false;
         	char charchivo[1024];
@@ -218,21 +214,21 @@ int main(int argc, char **argv){
         	fgets(charchivo, 1024, f);
         	if(charchivo[0]){
 				std::string nombreArchivo(charchivo);
-				nombreArchivo.pop_back();	// Quita el \n final
+				nombreArchivo.pop_back();	// Remove the final \ n
 				cout << "Abriendo video " << nombreArchivo << endl;
 				video.abrirVideo(nombreArchivo);
 				cout << "Video abierto." << endl;
 
-				// Abrir archivo de calibración, que es igual al de configuración pero sólo se leen los parámetros de cámara
+				// Open calibration file, which is the same as the configuration but only the camera parameters are read
 				Sistema->mpTracker->ChangeCalibration(
-						// Hay que cambiar la extensión del nombre del archivo de video por .yaml
+						// You have to change the extension of the name of the video file to .yaml
 						(nombreArchivo.erase(nombreArchivo.find_last_of('.'))).append(".yaml")
 				);
         	}
 
     	}
 
-    	// Abrir una webcam
+    	// Open a webcam
     	if(visor->abrirCamara){
     		visor->abrirCamara = false;
     		video.abrirCamara();
@@ -240,21 +236,21 @@ int main(int argc, char **argv){
     	}
 
     	/*
-        // Stop cronómetro para medir duración del procesamiento
+        // Stop stopwatch to measure processing duration
         double ttrack = std::chrono::duration_cast<std::chrono::duration<double> >(std::chrono::steady_clock::now() - t1).count();
 
-        // Delay para 30 fps, período de 0.033 s
+        // Delay for 30 fps, 0.033 s period
         if(ttrack < 0.033)
         	usleep((0.033-ttrack)*1e6);
         */
 
     }
-    cout << "Invocando shutdown..." << endl;
+    cout << "Invoke shutdown..." << endl;
 
     // Stop all threads
     SLAM.Shutdown();
 
-    cout << "Terminado." << endl;
+    cout << "Finished." << endl;
 
     return 0;
 }
