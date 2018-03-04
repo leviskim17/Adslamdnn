@@ -57,21 +57,21 @@ Viewer::Viewer(System* pSystem, FrameDrawer *pFrameDrawer, MapDrawer *pMapDrawer
     mViewpointZ = fSettings["Viewer.ViewpointZ"];
     mViewpointF = fSettings["Viewer.ViewpointF"];
 
-    // Explicación de las funciones de teclado
-    cout << endl << "Teclas que actúan sobre la ventana FrameDrawer:" << endl
-    		<< "t: Cambia el tamaño de las ventanas de imágenes.  Hay 3 tamaños: 100%, 50% y 25%." << endl
-    		<< "e: Entrada.  Alterna entre mostrar y ocultar la imagen de entrada a color.  Puede mostrarse distorsionada o antidistorsionada (undistort) con 'u'" << endl
-    		<< "u: Undistort, muestra la imagen de entrada antidistorsionada." << endl
+    // Explanation of keyboard functions
+    cout << endl << "Keys that act on the FrameDrawer window:" << endl
+    		<< "t: Change the size of the image windows. There are 3 sizes: 100%, 50% and 25%." << endl
+    		<< "e: Entry. Toggles between showing and hiding the color input image. It can be distorted or distorted (undistort) with 'u'" << endl
+    		<< "u: Undistort, shows the anti-distorted input image." << endl
     		<< endl
-    		<< "Si se procesa un archivo de video:" << endl
-    		<< "espacio: Pausa el video." << endl
-    		<< "r: Reversa, para invertir la secuencia de imágenes del video.  Alterna entre reversa y normal." << endl
-    		<< "a: Automático.  Cuando pierde el tracking, invierte la dirección del video hasta relocalizarse." << endl
+    		<< "If a video file is processed:" << endl
+    		<< "space: Pause the video." << endl
+    		<< "r: Reverse, to invert the sequence of video images. Alternate between reverse and normal." << endl
+    		<< "a: Automatic. When you lose tracking, reverse the direction of the video until you relocate." << endl
     		<< endl
-    		<< "Otros:" << endl
-    		<< "p: Pose, muestra la matriz de pose, de 4x4, compuesta de la submatriz rotación de 3x3, el vector traslación, y la última fila 0,0,0,1" << endl
-    		<< "c: Comprimir.  Alterna entre modo comprimido y normal, que se usa al guardar un mapa." << endl
-    		<< "w: abre la webcam, usando la calibración webcam.yaml.  Cicla entre webcams si hay más de una." << endl
+    		<< "Others:" << endl
+    		<< "p: Pose, shows the pose matrix, of 4x4, composed of the submatrix rotation of 3x3, the translation vector, and the last row 0,0,0,1" << endl
+    		<< "c: Compress. Toggles between compressed and normal mode, which is used when saving a map." << endl
+    		<< "w: open the webcam, using the webcam.yaml calibration. Cycling between webcams if there is more than one." << endl
     		<< "" << endl
     		<< "" << endl
     		<< "" << endl
@@ -82,7 +82,7 @@ void Viewer::Run(){
     mbFinished = false;
 
     pangolin::CreateWindowAndBind("ORB-SLAM2: Map Viewer",1024,768);
-	cout << "Pangolin creado." << endl;
+	cout << "Pangolin created." << endl;
 
     // 3D Mouse handler requires depth testing to be enabled
     glEnable(GL_DEPTH_TEST);
@@ -125,7 +125,7 @@ void Viewer::Run(){
 
 
 
-	cout << "Ventana para frame." << endl;
+	cout << "Window for frame." << endl;
     cv::namedWindow("ORB-SLAM2: Current Frame");
     {
     	unique_lock<mutex> lock(mutexIniTrackbar);

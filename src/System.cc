@@ -105,7 +105,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     cout << "Vocabulary loaded!" << endl << endl;
 
 
-    cout << "Terminando el constructor SLAM." << endl;
+    cout << "Terminate the SLAM constructor." << endl;
 }
 
 

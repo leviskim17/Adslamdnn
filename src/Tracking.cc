@@ -1181,7 +1181,7 @@ void Tracking::ChangeCalibration(const string &strSettingPath)
        return;
     }
 
-    // Matriz intrínseca
+    // Intrinsic matrix
     float fx = fSettings["Camera.fx"];
     float fy = fSettings["Camera.fy"];
     float cx = fSettings["Camera.cx"];
@@ -1195,12 +1195,12 @@ void Tracking::ChangeCalibration(const string &strSettingPath)
     K.copyTo(mK);
 
 
-    // Modo de cámara y coeficientes de distorsión
+    // Camera mode and distortion coefficients
     //cv::FileNode fn = fSettings["Camera.modo"];
     camaraModo = fSettings["Camera.modo"];
     //if(fn.isNone() || (int)fn == 0){
     if(camaraModo == 0){
-    	// Modo normal
+    	// Mode normal
 
         cv::Mat DistCoef(8,1,CV_32F);
         DistCoef.at<float>(0) = fSettings["Camera.k1"];
@@ -1212,17 +1212,17 @@ void Tracking::ChangeCalibration(const string &strSettingPath)
         const float k5 = DistCoef.at<float>(6) = fSettings["Camera.k5"];
         const float k6 = DistCoef.at<float>(7) = fSettings["Camera.k6"];
 
-        // UndistortPoints acorta su fórmula polinómica si el vector de coeficientes es más corto.  Las longitudes son 4, 5 u 8.
+        // UndistortPoints shortens its polynomial formula if the coefficient vector is shorter. The lengths are 4, 5 or 8.
         if(k5==0 && k6==0 && k4==0){
     		if(k3==0){
     			DistCoef.resize(4);
-    			cout << "2 coeficientes de distorsión radial." << endl;
+    			cout << "2 radial distortion coefficients." << endl;
     		}else{
     			DistCoef.resize(5);
-    			cout << "3 coeficientes de distorsión radial." << endl;
+    			cout << "3 radial distortion coefficients." << endl;
     		}
         } else
-    		cout << "6 coeficientes de distorsión radial." << endl;
+    		cout << "6 radial distortion coefficients." << endl;
 
         DistCoef.copyTo(mDistCoef);
     }else if(camaraModo == 1){
