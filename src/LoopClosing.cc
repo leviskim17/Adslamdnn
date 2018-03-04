@@ -35,12 +35,13 @@
 namespace ORB_SLAM2
 {
 
-LoopClosing::LoopClosing(Map *pMap, KeyFrameDatabase *pDB, ORBVocabulary *pVoc, const bool bFixScale):
+LoopClosing::LoopClosing(Map *pMap, KeyFrameDatabase *pDB, ORBVocabulary *pVoc)://, const bool bFixScale):
     mbResetRequested(false), mbFinishRequested(false), mbFinished(true), mpMap(pMap),
-    mpKeyFrameDB(pDB), mpORBVocabulary(pVoc), mpMatchedKF(NULL), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
-    mbStopGBA(false), mpThreadGBA(NULL), mbFixScale(bFixScale), mnFullBAIdx(0)
+    mpKeyFrameDB(pDB), mpORBVocabulary(pVoc), mLastLoopKFid(0), mbRunningGBA(false), mbFinishedGBA(true),
+    mbStopGBA(false)//, mbFixScale(bFixScale)
 {
     mnCovisibilityConsistencyTh = 3;
+    mpMatchedKF = NULL;
 }
 
 void LoopClosing::SetTracker(Tracking *pTracker)
@@ -221,9 +222,11 @@ bool LoopClosing::DetectLoop()
     }
     else
     {
-        return true;
+        // Continúa en ComputeSim3, mantiene mpCurrentKF con Not Erase.
+    	return true;
     }
 
+    // Entiendo que no se llega nunca hasta acá.
     mpCurrentKF->SetErase();
     return false;
 }
@@ -253,14 +256,15 @@ bool LoopClosing::ComputeSim3()
     {
         KeyFrame* pKF = mvpEnoughConsistentCandidates[i];
 
-        // avoid that local mapping erase it while it is being processed in this thread
-        pKF->SetNotErase();
 
-        if(pKF->isBad())
-        {
+        if(pKF->isBad()){
             vbDiscarded[i] = true;
             continue;
         }
+
+        // avoid that local mapping erase it while it is being processed in this thread
+        // Esta línea estaba antes de verificar si isBad.  La puse después, para que ningún KF malo se marque para no borrar.
+        pKF->SetNotErase();
 
         int nmatches = matcher.SearchByBoW(mpCurrentKF,pKF,vvpMapPointMatches[i]);
 
@@ -271,7 +275,7 @@ bool LoopClosing::ComputeSim3()
         }
         else
         {
-            Sim3Solver* pSolver = new Sim3Solver(mpCurrentKF,pKF,vvpMapPointMatches[i],mbFixScale);
+            Sim3Solver* pSolver = new Sim3Solver(mpCurrentKF,pKF,vvpMapPointMatches[i], false);//,mbFixScale);
             pSolver->SetRansacParameters(0.99,20,300);
             vpSim3Solvers[i] = pSolver;
         }
@@ -323,7 +327,7 @@ bool LoopClosing::ComputeSim3()
                 matcher.SearchBySim3(mpCurrentKF,pKF,vpMapPointMatches,s,R,t,7.5);
 
                 g2o::Sim3 gScm(Converter::toMatrix3d(R),Converter::toVector3d(t),s);
-                const int nInliers = Optimizer::OptimizeSim3(mpCurrentKF, pKF, vpMapPointMatches, gScm, 10, mbFixScale);
+                const int nInliers = Optimizer::OptimizeSim3(mpCurrentKF, pKF, vpMapPointMatches, gScm, 10);//, mbFixScale);
 
                 // If optimization is succesful stop ransacs and continue
                 if(nInliers>=20)
@@ -388,6 +392,7 @@ bool LoopClosing::ComputeSim3()
             if(mvpEnoughConsistentCandidates[i]!=mpMatchedKF)
                 mvpEnoughConsistentCandidates[i]->SetErase();
         return true;
+        // mpCurrentKF queda marcado con mbNotErase porque ahora forma parte de un bucle.
     }
     else
     {
@@ -410,16 +415,13 @@ void LoopClosing::CorrectLoop()
     // If a Global Bundle Adjustment is running, abort it
     if(isRunningGBA())
     {
-        unique_lock<mutex> lock(mMutexGBA);
         mbStopGBA = true;
 
-        mnFullBAIdx++;
+        while(!isFinishedGBA())
+            usleep(5000);
 
-        if(mpThreadGBA)
-        {
-            mpThreadGBA->detach();
-            delete mpThreadGBA;
-        }
+        mpThreadGBA->join();
+        delete mpThreadGBA;
     }
 
     // Wait until Local Mapping has effectively stopped
@@ -440,10 +442,13 @@ void LoopClosing::CorrectLoop()
     cv::Mat Twc = mpCurrentKF->GetPoseInverse();
 
 
+    // Comienza la corrección
     {
         // Get Map Mutex
         unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
 
+
+        // Releva las poses de los keyframes del mapa de covisibilidad, centrado en el keyframe que cierra el bucle, cuya pose es corrige para coincidir con el otro extremo.
         for(vector<KeyFrame*>::iterator vit=mvpCurrentConnectedKFs.begin(), vend=mvpCurrentConnectedKFs.end(); vit!=vend; vit++)
         {
             KeyFrame* pKFi = *vit;
@@ -452,11 +457,11 @@ void LoopClosing::CorrectLoop()
 
             if(pKFi!=mpCurrentKF)
             {
-                cv::Mat Tic = Tiw*Twc;
+                cv::Mat Tic = Tiw*Twc;	// Pose relativa al keyframe actual
                 cv::Mat Ric = Tic.rowRange(0,3).colRange(0,3);
                 cv::Mat tic = Tic.rowRange(0,3).col(3);
-                g2o::Sim3 g2oSic(Converter::toMatrix3d(Ric),Converter::toVector3d(tic),1.0);
-                g2o::Sim3 g2oCorrectedSiw = g2oSic*mg2oScw;
+                g2o::Sim3 g2oSic(Converter::toMatrix3d(Ric),Converter::toVector3d(tic),1.0);	// Transformación sim3 relativa al keyframe actual, con factor de escala 1.
+                g2o::Sim3 g2oCorrectedSiw = g2oSic*mg2oScw;	// Transformación sim3 absoluta
                 //Pose corrected with the Sim3 of the loop closure
                 CorrectedSim3[pKFi]=g2oCorrectedSiw;
             }
@@ -468,7 +473,7 @@ void LoopClosing::CorrectLoop()
             NonCorrectedSim3[pKFi]=g2oSiw;
         }
 
-        // Correct all MapPoints obsrved by current keyframe and neighbors, so that they align with the other side of the loop
+        // Correct all MapPoints observed by current keyframe and neighbors, so that they align with the other side of the loop
         for(KeyFrameAndPose::iterator mit=CorrectedSim3.begin(), mend=CorrectedSim3.end(); mit!=mend; mit++)
         {
             KeyFrame* pKFi = mit->first;
@@ -543,6 +548,8 @@ void LoopClosing::CorrectLoop()
 
 
     // After the MapPoint fusion, new links in the covisibility graph will appear attaching both sides of the loop
+    // El for siguiente realiza un KeyFrame::UpdateConnections sobre cada keyframe, y obtiene las nuevas conexiones en LoopConnections,
+    // partiendo de todas y restando las anteriores al UpdateConnections.
     map<KeyFrame*, set<KeyFrame*> > LoopConnections;
 
     for(vector<KeyFrame*>::iterator vit=mvpCurrentConnectedKFs.begin(), vend=mvpCurrentConnectedKFs.end(); vit!=vend; vit++)
@@ -564,9 +571,7 @@ void LoopClosing::CorrectLoop()
     }
 
     // Optimize graph
-    Optimizer::OptimizeEssentialGraph(mpMap, mpMatchedKF, mpCurrentKF, NonCorrectedSim3, CorrectedSim3, LoopConnections, mbFixScale);
-
-    mpMap->InformNewBigChange();
+    Optimizer::OptimizeEssentialGraph(mpMap, mpMatchedKF, mpCurrentKF, NonCorrectedSim3, CorrectedSim3, LoopConnections, false);
 
     // Add loop edge
     mpMatchedKF->AddLoopEdge(mpCurrentKF);
@@ -581,8 +586,11 @@ void LoopClosing::CorrectLoop()
     // Loop closed. Release Local Mapping.
     mpLocalMapper->Release();    
 
+    cout << "Loop Closed!" << endl;
+
     mLastLoopKFid = mpCurrentKF->mnId;   
 }
+
 
 void LoopClosing::SearchAndFuse(const KeyFrameAndPose &CorrectedPosesMap)
 {
@@ -646,8 +654,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
 {
     cout << "Starting Global Bundle Adjustment" << endl;
 
-    int idx =  mnFullBAIdx;
-    Optimizer::GlobalBundleAdjustemnt(mpMap,10,&mbStopGBA,nLoopKF,false);
+    Optimizer::GlobalBundleAdjustemnt(mpMap,20,&mbStopGBA,nLoopKF,false);
 
     // Update all MapPoints and KeyFrames
     // Local Mapping was active during BA, that means that there might be new keyframes
@@ -655,8 +662,7 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
     // We need to propagate the correction through the spanning tree
     {
         unique_lock<mutex> lock(mMutexGBA);
-        if(idx!=mnFullBAIdx)
-            return;
+
 
         if(!mbStopGBA)
         {
@@ -664,7 +670,6 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
             cout << "Updating map ..." << endl;
             mpLocalMapper->RequestStop();
             // Wait until Local Mapping has effectively stopped
-
             while(!mpLocalMapper->isStopped() && !mpLocalMapper->isFinished())
             {
                 usleep(1000);
@@ -732,11 +737,9 @@ void LoopClosing::RunGlobalBundleAdjustment(unsigned long nLoopKF)
                     cv::Mat Rwc = Twc.rowRange(0,3).colRange(0,3);
                     cv::Mat twc = Twc.rowRange(0,3).col(3);
 
-                    pMP->SetWorldPos(Rwc*Xc+twc);
+                    pMP->SetWorldPos((cv::Mat)(Rwc*Xc+twc));	// Conversión explícita a Mat, porque eclipse a veces no la reconoce implícitamente, no sé por qué.
                 }
-            }            
-
-            mpMap->InformNewBigChange();
+            }
 
             mpLocalMapper->Release();
 

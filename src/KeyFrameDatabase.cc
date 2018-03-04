@@ -20,8 +20,9 @@
 
 #include "KeyFrameDatabase.h"
 
+#include "Frame.h"
 #include "KeyFrame.h"
-#include "Thirdparty/DBoW2/DBoW2/BowVector.h"
+#include "../Thirdparty/DBoW2/DBoW2/BowVector.h"
 
 #include<mutex>
 
@@ -29,7 +30,6 @@ using namespace std;
 
 namespace ORB_SLAM2
 {
-
 KeyFrameDatabase::KeyFrameDatabase (const ORBVocabulary &voc):
     mpVoc(&voc)
 {
@@ -83,10 +83,12 @@ vector<KeyFrame*> KeyFrameDatabase::DetectLoopCandidates(KeyFrame* pKF, float mi
     {
         unique_lock<mutex> lock(mMutex);
 
+        // Recorre los BoW del keyframe pKF
         for(DBoW2::BowVector::const_iterator vit=pKF->mBowVec.begin(), vend=pKF->mBowVec.end(); vit != vend; vit++)
         {
             list<KeyFrame*> &lKFs =   mvInvertedFile[vit->first];
 
+            // Para cada BoW de pKF, recorre todos los keyframes pKFi que contengan ese BoW
             for(list<KeyFrame*>::iterator lit=lKFs.begin(), lend= lKFs.end(); lit!=lend; lit++)
             {
                 KeyFrame* pKFi=*lit;
@@ -306,6 +308,11 @@ vector<KeyFrame*> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
     }
 
     return vpRelocCandidates;
+}
+
+
+void KeyFrameDatabase::resizeInvertedFile(size_t tamanio){
+    mvInvertedFile.resize(tamanio);
 }
 
 } //namespace ORB_SLAM

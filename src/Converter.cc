@@ -57,7 +57,7 @@ cv::Mat Converter::toCvMat(const g2o::Sim3 &Sim3)
     Eigen::Matrix3d eigR = Sim3.rotation().toRotationMatrix();
     Eigen::Vector3d eigt = Sim3.translation();
     double s = Sim3.scale();
-    return toCvSE3(s*eigR,eigt);
+    return toCvSE3((Eigen::Matrix3d)(s*eigR),(Eigen::Vector3d)eigt);
 }
 
 cv::Mat Converter::toCvMat(const Eigen::Matrix<double,4,4> &m)
@@ -89,7 +89,8 @@ cv::Mat Converter::toCvMat(const Eigen::Matrix<double,3,1> &m)
     return cvMat.clone();
 }
 
-cv::Mat Converter::toCvSE3(const Eigen::Matrix<double,3,3> &R, const Eigen::Matrix<double,3,1> &t)
+//cv::Mat Converter::toCvSE3(const Eigen::Matrix<double,3,3> &R, const Eigen::Matrix<double,3,1> &t)
+cv::Mat Converter::toCvSE3(const Eigen::Matrix3d &R, const Eigen::Vector3d &t)
 {
     cv::Mat cvMat = cv::Mat::eye(4,4,CV_32F);
     for(int i=0;i<3;i++)

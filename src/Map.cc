@@ -19,13 +19,16 @@
 */
 
 #include "Map.h"
+#include "MapPoint.h"
+#include "KeyFrame.h"
 
-#include<mutex>
+
+#include <mutex>
 
 namespace ORB_SLAM2
 {
 
-Map::Map():mnMaxKFid(0),mnBigChangeIdx(0)
+Map::Map():mnMaxKFid(0)
 {
 }
 
@@ -65,18 +68,6 @@ void Map::SetReferenceMapPoints(const vector<MapPoint *> &vpMPs)
 {
     unique_lock<mutex> lock(mMutexMap);
     mvpReferenceMapPoints = vpMPs;
-}
-
-void Map::InformNewBigChange()
-{
-    unique_lock<mutex> lock(mMutexMap);
-    mnBigChangeIdx++;
-}
-
-int Map::GetLastBigChangeIdx()
-{
-    unique_lock<mutex> lock(mMutexMap);
-    return mnBigChangeIdx;
 }
 
 vector<KeyFrame*> Map::GetAllKeyFrames()
@@ -129,5 +120,13 @@ void Map::clear()
     mvpReferenceMapPoints.clear();
     mvpKeyFrameOrigins.clear();
 }
+
+bool Map::isInMap(KeyFrame *pKF){
+	return mspKeyFrames.count(pKF);
+}
+bool Map::isInMap(MapPoint *pMP){
+	return mspMapPoints.count(pMP);
+}
+
 
 } //namespace ORB_SLAM

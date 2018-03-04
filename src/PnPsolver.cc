@@ -55,7 +55,7 @@
 #include <vector>
 #include <cmath>
 #include <opencv2/core/core.hpp>
-#include "Thirdparty/DBoW2/DUtils/Random.h"
+#include "../Thirdparty/DBoW2/DUtils/Random.h"
 #include <algorithm>
 
 using namespace std;
@@ -196,7 +196,8 @@ cv::Mat PnPsolver::iterate(int nIterations, bool &bNoMore, vector<bool> &vbInlie
 
             add_correspondence(mvP3Dw[idx].x,mvP3Dw[idx].y,mvP3Dw[idx].z,mvP2D[idx].x,mvP2D[idx].y);
 
-            vAvailableIndices[randi] = vAvailableIndices.back();
+            //vAvailableIndices[idx] = vAvailableIndices.back();	// Bug corregido
+            vAvailableIndices[randi] = vAvailableIndices.back();  // Bug corregido https://github.com/raulmur/ORB_SLAM2/pull/137/files
             vAvailableIndices.pop_back();
         }
 

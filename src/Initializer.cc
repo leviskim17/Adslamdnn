@@ -20,7 +20,7 @@
 
 #include "Initializer.h"
 
-#include "Thirdparty/DBoW2/DUtils/Random.h"
+#include "../Thirdparty/DBoW2/DUtils/Random.h"
 
 #include "Optimizer.h"
 #include "ORBmatcher.h"
@@ -634,12 +634,13 @@ bool Initializer::ReconstructH(vector<bool> &vbMatchesInliers, cv::Mat &H21, cv:
         tp*=d1-d3;
 
         cv::Mat t = U*tp;
-        vt.push_back(t/cv::norm(t));
+        vt.push_back(static_cast<cv::Mat>(t/cv::norm(t)));
 
         cv::Mat np(3,1,CV_32F);
         np.at<float>(0)=x1[i];
         np.at<float>(1)=0;
-        np.at<float>(2)=x3[i];
+        //np.at<float>(2)=x3[i];	// Código original, sin el signo menos, cuestionado en https://github.com/raulmur/ORB_SLAM2/issues/289
+        np.at<float>(2)=-x3[i];	// Código modificado, quitado el signo menos
 
         cv::Mat n = V*np;
         if(n.at<float>(2)<0)
@@ -672,7 +673,7 @@ bool Initializer::ReconstructH(vector<bool> &vbMatchesInliers, cv::Mat &H21, cv:
         tp*=d1+d3;
 
         cv::Mat t = U*tp;
-        vt.push_back(t/cv::norm(t));
+        vt.push_back(static_cast<cv::Mat>(t/cv::norm(t)));
 
         cv::Mat np(3,1,CV_32F);
         np.at<float>(0)=x1[i];
@@ -740,9 +741,12 @@ void Initializer::Triangulate(const cv::KeyPoint &kp1, const cv::KeyPoint &kp2, 
     A.row(2) = kp2.pt.x*P2.row(2)-P2.row(0);
     A.row(3) = kp2.pt.y*P2.row(2)-P2.row(1);
 
-    cv::Mat u,w,vt;
+    cv::Mat u,w,vt;	// Resultados, sólo interesa vt
     cv::SVD::compute(A,w,u,vt,cv::SVD::MODIFY_A| cv::SVD::FULL_UV);
+
+    // Extrae el punto en coordenadas homogénea
     x3D = vt.row(3).t();
+    // Pasa de coordenadas homogéneas a euclideanas
     x3D = x3D.rowRange(0,3)/x3D.at<float>(3);
 }
 

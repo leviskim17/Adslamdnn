@@ -21,10 +21,19 @@
 #include "KeyFrame.h"
 #include "Converter.h"
 #include "ORBmatcher.h"
-#include<mutex>
+#include "ORBextractor.h"
+#include "System.h"
+#include "MapPoint.h"
+#include "Frame.h"
+#include "KeyFrameDatabase.h"
+#include <mutex>
+
+
+extern ORB_SLAM2::System *Sistema;
 
 namespace ORB_SLAM2
 {
+
 
 long unsigned int KeyFrame::nNextId=0;
 
@@ -34,14 +43,14 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
     mnTrackReferenceForFrame(0), mnFuseTargetForKF(0), mnBALocalForKF(0), mnBAFixedForKF(0),
     mnLoopQuery(0), mnLoopWords(0), mnRelocQuery(0), mnRelocWords(0), mnBAGlobalForKF(0),
     fx(F.fx), fy(F.fy), cx(F.cx), cy(F.cy), invfx(F.invfx), invfy(F.invfy),
-    mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), N(F.N), mvKeys(F.mvKeys), mvKeysUn(F.mvKeysUn),
-    mvuRight(F.mvuRight), mvDepth(F.mvDepth), mDescriptors(F.mDescriptors.clone()),
+    /*mbf(F.mbf), mb(F.mb), mThDepth(F.mThDepth), */N(F.N), mvKeys(F.mvKeys), mvKeysUn(F.mvKeysUn),
+    mDescriptors(F.mDescriptors.clone()),
     mBowVec(F.mBowVec), mFeatVec(F.mFeatVec), mnScaleLevels(F.mnScaleLevels), mfScaleFactor(F.mfScaleFactor),
     mfLogScaleFactor(F.mfLogScaleFactor), mvScaleFactors(F.mvScaleFactors), mvLevelSigma2(F.mvLevelSigma2),
     mvInvLevelSigma2(F.mvInvLevelSigma2), mnMinX(F.mnMinX), mnMinY(F.mnMinY), mnMaxX(F.mnMaxX),
     mnMaxY(F.mnMaxY), mK(F.mK), mvpMapPoints(F.mvpMapPoints), mpKeyFrameDB(pKFDB),
     mpORBvocabulary(F.mpORBvocabulary), mbFirstConnection(true), mpParent(NULL), mbNotErase(false),
-    mbToBeErased(false), mbBad(false), mHalfBaseline(F.mb/2), mpMap(pMap)
+    mbToBeErased(false), mbBad(false), mpMap(pMap)
 {
     mnId=nNextId++;
 
@@ -53,14 +62,24 @@ KeyFrame::KeyFrame(Frame &F, Map *pMap, KeyFrameDatabase *pKFDB):
             mGrid[i][j] = F.mGrid[i][j];
     }
 
-    SetPose(F.mTcw);    
+    SetPose(F.mTcw);
+
+    // Relevar los colores de los keypoints,  En este caso toma el color del píxel.  Se podría promediar el contexto.
+    if(!(Sistema->imagenEntrada.empty())){
+    	vRgb.resize(N);
+    	for(int i=0; i<N; i++)
+    		vRgb[i] = Sistema->imagenEntrada.at<cv::Vec3b>(mvKeys[i].pt);
+    }
 }
 
 void KeyFrame::ComputeBoW()
 {
-    if(mBowVec.empty() || mFeatVec.empty())
+    if(mBowVec.empty() || mFeatVec.empty() || bows.empty())
     {
         vector<cv::Mat> vCurrentDesc = Converter::toDescriptorVector(mDescriptors);
+        bows.assign(N, static_cast<unsigned int>(NULL));
+        bowPesos.assign(N, static_cast<double>(NULL));
+
         // Feature vector associate features with nodes in the 4th level (from leaves up)
         // We assume the vocabulary tree has 6 levels, change the 4 otherwise
         mpORBvocabulary->transform(vCurrentDesc,mBowVec,mFeatVec,4);
@@ -74,13 +93,12 @@ void KeyFrame::SetPose(const cv::Mat &Tcw_)
     cv::Mat Rcw = Tcw.rowRange(0,3).colRange(0,3);
     cv::Mat tcw = Tcw.rowRange(0,3).col(3);
     cv::Mat Rwc = Rcw.t();
+
     Ow = -Rwc*tcw;
 
     Twc = cv::Mat::eye(4,4,Tcw.type());
     Rwc.copyTo(Twc.rowRange(0,3).colRange(0,3));
     Ow.copyTo(Twc.rowRange(0,3).col(3));
-    cv::Mat center = (cv::Mat_<float>(4,1) << mHalfBaseline, 0 , 0, 1);
-    Cw = Twc*center;
 }
 
 cv::Mat KeyFrame::GetPose()
@@ -101,13 +119,6 @@ cv::Mat KeyFrame::GetCameraCenter()
     return Ow.clone();
 }
 
-cv::Mat KeyFrame::GetStereoCenter()
-{
-    unique_lock<mutex> lock(mMutexPose);
-    return Cw.clone();
-}
-
-
 cv::Mat KeyFrame::GetRotation()
 {
     unique_lock<mutex> lock(mMutexPose);
@@ -122,6 +133,8 @@ cv::Mat KeyFrame::GetTranslation()
 
 void KeyFrame::AddConnection(KeyFrame *pKF, const int &weight)
 {
+    if(mbBad || pKF->isBad()) return;	// Agregado por mí
+
     {
         unique_lock<mutex> lock(mMutexConnections);
         if(!mConnectedKeyFrameWeights.count(pKF))
@@ -200,7 +213,8 @@ vector<KeyFrame*> KeyFrame::GetCovisiblesByWeight(const int &w)
 
 int KeyFrame::GetWeight(KeyFrame *pKF)
 {
-    unique_lock<mutex> lock(mMutexConnections);
+    // Quizás no es necesario el mutex
+	unique_lock<mutex> lock(mMutexConnections);
     if(mConnectedKeyFrameWeights.count(pKF))
         return mConnectedKeyFrameWeights[pKF];
     else
@@ -303,10 +317,7 @@ void KeyFrame::UpdateConnections()
     {
         MapPoint* pMP = *vit;
 
-        if(!pMP)
-            continue;
-
-        if(pMP->isBad())
+        if(!pMP || pMP->isBad() || pMP->plCandidato || pMP->plLejano)// Puntos lejanos: excluídos del grafo de covisibilidad
             continue;
 
         map<KeyFrame*,size_t> observations = pMP->GetObservations();
@@ -363,25 +374,38 @@ void KeyFrame::UpdateConnections()
     {
         unique_lock<mutex> lockCon(mMutexConnections);
 
-        // mspConnectedKeyFrames = spConnectedKeyFrames;
+        if(mbBad) return;
+
         mConnectedKeyFrameWeights = KFcounter;
         mvpOrderedConnectedKeyFrames = vector<KeyFrame*>(lKFs.begin(),lKFs.end());
         mvOrderedWeights = vector<int>(lWs.begin(), lWs.end());
 
+        // Agrego la condición de no tener padre
+        //if((mbFirstConnection || !mpParent) && mnId!=0)
         if(mbFirstConnection && mnId!=0)
         {
             mpParent = mvpOrderedConnectedKeyFrames.front();
-            mpParent->AddChild(this);
+            mpParent->AddChild(this);	// ChangeParent(mpParent)
             mbFirstConnection = false;
         }
 
     }
+
+    /* Han aparecido KF sin padre (padre NULL), y os1 se cuelga cuando se lo marca como malo con SetBadFlag.
+     * El padre se asigna aquí y también en SetBadFlag cuando se elimina punto, le cambian a sus hijos el padre por el abuelo.
+     * Acá se controla que no salga ningún KF sin padre, excepto el primero.
+     */
+
+    //if(mnId!=0 && !mpParent)
+    	//cout << "UpdateConnections deja huérfano al KF " << mnId << endl;
+
 }
 
 void KeyFrame::AddChild(KeyFrame *pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
-    mspChildrens.insert(pKF);
+    if(!mbBad && !pKF->isBad())	// Agregado por mí, intentando eliminar posible causa que revive keyframes muertos
+    	mspChildrens.insert(pKF);
 }
 
 void KeyFrame::EraseChild(KeyFrame *pKF)
@@ -418,6 +442,7 @@ bool KeyFrame::hasChild(KeyFrame *pKF)
 void KeyFrame::AddLoopEdge(KeyFrame *pKF)
 {
     unique_lock<mutex> lockCon(mMutexConnections);
+
     mbNotErase = true;
     mspLoopEdges.insert(pKF);
 }
@@ -451,34 +476,64 @@ void KeyFrame::SetErase()
 }
 
 void KeyFrame::SetBadFlag()
-{   
+{
     {
+    	// Verifica que no esté prohibida la eliminación por parte de la detección de bucles
         unique_lock<mutex> lock(mMutexConnections);
         if(mnId==0)
             return;
-        else if(mbNotErase)
-        {
+        else if(mbNotErase){
             mbToBeErased = true;
             return;
         }
+
+        if(!mpParent)
+        	cout << "SetBadFlag invocado sobre KF sin padre " << mnId << endl;
+
+        if(mbBad){
+        	cout << "SetBadFlag invocado sobre KF malo " << mnId << endl;
+        	return;
+        }
+
+
+
+    	// Agregado por mí, para que no haya solapamiento
+        mbBad = true;
+        mpMap->EraseKeyFrame(this);
+        mpKeyFrameDB->erase(this);
+        // Se repite al final en su código original, sólo por no borrarlo.
+
     }
 
+    // Se procede con la eliminación del keyframe
+
+    // Se elimina del mapa de conexiones de los otros keyframes
     for(map<KeyFrame*,int>::iterator mit = mConnectedKeyFrameWeights.begin(), mend=mConnectedKeyFrameWeights.end(); mit!=mend; mit++)
         mit->first->EraseConnection(this);
 
+    // Se elimina de las observaciones de sus mapPoints
     for(size_t i=0; i<mvpMapPoints.size(); i++)
         if(mvpMapPoints[i])
             mvpMapPoints[i]->EraseObservation(this);
+
+    // Se quita del grafo de conexiones y lo remienda
     {
         unique_lock<mutex> lock(mMutexConnections);
         unique_lock<mutex> lock1(mMutexFeatures);
 
+        // Libera memoria
         mConnectedKeyFrameWeights.clear();
         mvpOrderedConnectedKeyFrames.clear();
 
+        // Actualiza el grafo de keyframes, buscando candidatos de padre para sus hijos
+
         // Update Spanning Tree
         set<KeyFrame*> sParentCandidates;
-        sParentCandidates.insert(mpParent);
+        if(mpParent)	// Aislando conflictos, buscando la causa por la que algunos KF no tienen padre
+        	sParentCandidates.insert(mpParent);
+
+        if(!mpParent && !mspChildrens.empty())
+        	cout << "KF sin padre y con hijos que quedarán huérfanos: " << mnId << endl;
 
         // Assign at each iteration one children with a parent (the pair with highest covisibility weight)
         // Include that children as new parent candidate for the rest
@@ -490,23 +545,27 @@ void KeyFrame::SetBadFlag()
             KeyFrame* pC;
             KeyFrame* pP;
 
+            // Recorre todos los hijos, con pKF.
             for(set<KeyFrame*>::iterator sit=mspChildrens.begin(), send=mspChildrens.end(); sit!=send; sit++)
             {
                 KeyFrame* pKF = *sit;
                 if(pKF->isBad())
                     continue;
 
+                // Recorre los keyframes covisibles del hijo, con vpConnected[i]
                 // Check if a parent candidate is connected to the keyframe
                 vector<KeyFrame*> vpConnected = pKF->GetVectorCovisibleKeyFrames();
                 for(size_t i=0, iend=vpConnected.size(); i<iend; i++)
                 {
+                	// Recorre los padres candidatos, con *spcit
                     for(set<KeyFrame*>::iterator spcit=sParentCandidates.begin(), spcend=sParentCandidates.end(); spcit!=spcend; spcit++)
                     {
-                        if(vpConnected[i]->mnId == (*spcit)->mnId)
-                        {
+                        if(vpConnected[i]->mnId == (*spcit)->mnId){
+                        	// Comprobó que el padre candidato está conectado, calcula la ponderación de la conexión
                             int w = pKF->GetWeight(vpConnected[i]);
                             if(w>max)
                             {
+                            	// Recuerda el par padre-hijo de mejor ponderación
                                 pC = pKF;
                                 pP = vpConnected[i];
                                 max = w;
@@ -517,36 +576,45 @@ void KeyFrame::SetBadFlag()
                 }
             }
 
-            if(bContinue)
-            {
+            if(bContinue){
+            	// Habiendo encontrado al par padre-hijo de mejor ponderación, los conecta
                 pC->ChangeParent(pP);
                 sParentCandidates.insert(pC);
                 mspChildrens.erase(pC);
             }
             else
+            	// No encontró ningún par padre-hijo, se terminó el trabajo
                 break;
         }
 
         // If a children has no covisibility links with any parent candidate, assign to the original parent of this KF
         if(!mspChildrens.empty())
+        	// Recorre los hijos que todavía no consiguieron padre, y les asigna el abuelo
             for(set<KeyFrame*>::iterator sit=mspChildrens.begin(); sit!=mspChildrens.end(); sit++)
-            {
                 (*sit)->ChangeParent(mpParent);
-            }
 
-        mpParent->EraseChild(this);
-        mTcp = Tcw*mpParent->GetPoseInverse();
-        mbBad = true;
+        mspChildrens.clear();	// Agregado por mí
+
+        if(mpParent)	// Aislando conflictos, buscando la causa por la que algunos KF no tienen padre
+        	mpParent->EraseChild(this);
+
+        // En este momento el keyframe está fuera del grafo de conexión.
+
+        // ¿Para qué?
+        //mTcp = Tcw*mpParent->GetPoseInverse();
+
+
+        //mbBad = true;	// Movido al principio
     }
 
 
-    mpMap->EraseKeyFrame(this);
-    mpKeyFrameDB->erase(this);
+    //mpMap->EraseKeyFrame(this);
+    //mpKeyFrameDB->erase(this);
 }
 
-bool KeyFrame::isBad()
-{
-    unique_lock<mutex> lock(mMutexConnections);
+bool KeyFrame::isBad(){
+	// Parece que este mutex no hace falta.
+    //unique_lock<mutex> lock(mMutexConnections);
     return mbBad;
 }
 
@@ -610,24 +678,6 @@ vector<size_t> KeyFrame::GetFeaturesInArea(const float &x, const float &y, const
 bool KeyFrame::IsInImage(const float &x, const float &y) const
 {
     return (x>=mnMinX && x<mnMaxX && y>=mnMinY && y<mnMaxY);
-}
-
-cv::Mat KeyFrame::UnprojectStereo(int i)
-{
-    const float z = mvDepth[i];
-    if(z>0)
-    {
-        const float u = mvKeys[i].pt.x;
-        const float v = mvKeys[i].pt.y;
-        const float x = (u-cx)*z*invfx;
-        const float y = (v-cy)*z*invfy;
-        cv::Mat x3Dc = (cv::Mat_<float>(3,1) << x, y, z);
-
-        unique_lock<mutex> lock(mMutexPose);
-        return Twc.rowRange(0,3).colRange(0,3)*x3Dc+Twc.rowRange(0,3).col(3);
-    }
-    else
-        return cv::Mat();
 }
 
 float KeyFrame::ComputeSceneMedianDepth(const int q)

@@ -27,8 +27,8 @@
 #ifndef G2O_LINEAR_SOLVER_EIGEN_H
 #define G2O_LINEAR_SOLVER_EIGEN_H
 
-#include <Eigen/Sparse>
-#include <Eigen/SparseCholesky>
+#include <eigen3/Eigen/Sparse>
+#include <eigen3/Eigen/SparseCholesky>
 
 #include "../core/linear_solver.h"
 #include "../core/batch_stats.h"
@@ -53,7 +53,7 @@ class LinearSolverEigen: public LinearSolver<MatrixType>
   public:
     typedef Eigen::SparseMatrix<double, Eigen::ColMajor> SparseMatrix;
     typedef Eigen::Triplet<double> Triplet;
-    typedef Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic> PermutationMatrix;
+    typedef Eigen::PermutationMatrix<Eigen::Dynamic, Eigen::Dynamic, SparseMatrix::Index> PermutationMatrix;
     /**
      * \brief Sub-classing Eigen's SimplicialLDLT to perform ordering with a given ordering
      */

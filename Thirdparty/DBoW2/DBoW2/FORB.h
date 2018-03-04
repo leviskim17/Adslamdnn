@@ -61,6 +61,14 @@ public:
   static void fromString(TDescriptor &a, const std::string &s);
 
   /**
+   * Devuelve un descriptor a partir de sus datos binarios en un array.
+   * Esta función fue inspirada en fromString.
+   * @param a descriptor
+   * @param buffer array con el descriptor
+   */
+  static void fromArray(TDescriptor &a, unsigned char* p);
+
+  /**
    * Returns a mat with the descriptors in float format
    * @param descriptors
    * @param mat (out) NxL 32F matrix

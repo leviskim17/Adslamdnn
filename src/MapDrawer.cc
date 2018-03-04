@@ -24,8 +24,7 @@
 #include <pangolin/pangolin.h>
 #include <mutex>
 
-namespace ORB_SLAM2
-{
+namespace ORB_SLAM2 {
 
 
 MapDrawer::MapDrawer(Map* pMap, const string &strSettingPath):mpMap(pMap)
@@ -38,46 +37,87 @@ MapDrawer::MapDrawer(Map* pMap, const string &strSettingPath):mpMap(pMap)
     mPointSize = fSettings["Viewer.PointSize"];
     mCameraSize = fSettings["Viewer.CameraSize"];
     mCameraLineWidth = fSettings["Viewer.CameraLineWidth"];
-
 }
 
-void MapDrawer::DrawMapPoints()
-{
+void MapDrawer::DrawMapPoints(bool color){
+    // Puntos del mapa
     const vector<MapPoint*> &vpMPs = mpMap->GetAllMapPoints();
-    const vector<MapPoint*> &vpRefMPs = mpMap->GetReferenceMapPoints();
+    if(vpMPs.empty())
+        return;	// Salir si no hay mapa
 
+    // Puntos del mapa local
+    const vector<MapPoint*> &vpRefMPs = mpMap->GetReferenceMapPoints();
     set<MapPoint*> spRefMPs(vpRefMPs.begin(), vpRefMPs.end());
 
-    if(vpMPs.empty())
-        return;
+    size_t N = vpMPs.size() + spRefMPs.size();
 
-    glPointSize(mPointSize);
-    glBegin(GL_POINTS);
-    glColor3f(0.0,0.0,0.0);
+    struct glPunto{
+    	float x;
+    	float y;
+    	float z;
+    	uchar r;
+    	uchar g;
+    	uchar b;
+    	char padding[17];	// Así la estructura es múltiplo de 32 bytes
+    };
+    glPunto glPuntos[N];
 
-    for(size_t i=0, iend=vpMPs.size(); i<iend;i++)
-    {
-        if(vpMPs[i]->isBad() || spRefMPs.count(vpMPs[i]))
+
+    int i = 0;
+    for(auto punto : vpMPs){
+    	// Motivos para descartar el punto
+        if(punto->isBad())
             continue;
-        cv::Mat pos = vpMPs[i]->GetWorldPos();
-        glVertex3f(pos.at<float>(0),pos.at<float>(1),pos.at<float>(2));
+
+        // Agrega el punto
+        cv::Mat pos = punto->GetWorldPos();
+
+        glPunto &glp = glPuntos[i++];
+        glp.x = pos.at<float>(0);
+        glp.y = pos.at<float>(1);
+        glp.z = pos.at<float>(2);
+
+        if(color){
+            auto rgb = punto->rgb;
+			glp.r = rgb[2];
+			glp.g = rgb[1];
+			glp.b = rgb[0];
+        } else if(punto->plCandidato){
+        	// Punto lejano
+        	cv::Scalar color = punto->color();
+			glp.r = color[2];
+			glp.g = color[1];
+			glp.b = color[0];
+        	/*
+        	// Punto lejano: VIOLETA
+			glp.r = 192;
+			glp.g = 0;
+			glp.b = 192;
+			*/
+        } else if(spRefMPs.count(punto)){
+        	// Punto del mapa local: VERDE
+			glp.r = 0;
+			glp.g = 192;
+			glp.b = 0;
+        } else {
+        	// Punto del mapa, pero no local: NEGRO
+			glp.r = 0;
+			glp.g = 0;
+			glp.b = 0;
+        }
     }
-    glEnd();
 
-    glPointSize(mPointSize);
-    glBegin(GL_POINTS);
-    glColor3f(1.0,0.0,0.0);
+    // OpenGL
+    glPointSize(color?4:2);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glVertexPointer(3, GL_FLOAT, sizeof(glPunto), &glPuntos[0].x);
+    glEnableClientState (GL_COLOR_ARRAY);
+    glColorPointer(3, GL_UNSIGNED_BYTE, sizeof(glPunto), &glPuntos[0].r);
 
-    for(set<MapPoint*>::iterator sit=spRefMPs.begin(), send=spRefMPs.end(); sit!=send; sit++)
-    {
-        if((*sit)->isBad())
-            continue;
-        cv::Mat pos = (*sit)->GetWorldPos();
-        glVertex3f(pos.at<float>(0),pos.at<float>(1),pos.at<float>(2));
+    glDrawArrays(GL_POINTS, 0, i);
 
-    }
-
-    glEnd();
+    glDisableClientState (GL_COLOR_ARRAY);
+    glDisableClientState (GL_VERTEX_ARRAY);
 }
 
 void MapDrawer::DrawKeyFrames(const bool bDrawKF, const bool bDrawGraph)
@@ -191,7 +231,7 @@ void MapDrawer::DrawCurrentCamera(pangolin::OpenGlMatrix &Twc)
 #endif
 
     glLineWidth(mCameraLineWidth);
-    glColor3f(0.0f,1.0f,0.0f);
+    glColor3f(1.0f,0.0f,1.0f);	// RGB
     glBegin(GL_LINES);
     glVertex3f(0,0,0);
     glVertex3f(w,h,z);
@@ -227,16 +267,20 @@ void MapDrawer::SetCurrentCameraPose(const cv::Mat &Tcw)
 
 void MapDrawer::GetCurrentOpenGLCameraMatrix(pangolin::OpenGlMatrix &M)
 {
-    if(!mCameraPose.empty())
-    {
+    if(!mCameraPose.empty()){
+    	// Lo usual.  mCameraPose está actualizado por Track en el estado OK, copiando Tcw del cuadro actual.
+
+    	// Deconstruye Tcw y forma Rwc y twc, que representan Twc: la pose del mundo respecto de la cámara.
         cv::Mat Rwc(3,3,CV_32F);
         cv::Mat twc(3,1,CV_32F);
+
         {
             unique_lock<mutex> lock(mMutexCamera);
             Rwc = mCameraPose.rowRange(0,3).colRange(0,3).t();
             twc = -Rwc*mCameraPose.rowRange(0,3).col(3);
         }
 
+        // Construye M a partir de Rwc y twc
         M.m[0] = Rwc.at<float>(0,0);
         M.m[1] = Rwc.at<float>(1,0);
         M.m[2] = Rwc.at<float>(2,0);
@@ -258,7 +302,30 @@ void MapDrawer::GetCurrentOpenGLCameraMatrix(pangolin::OpenGlMatrix &M)
         M.m[15]  = 1.0;
     }
     else
+    	// Por si el sistema no inicializó poses todavía
         M.SetIdentity();
 }
+
+void MapDrawer::GetCurrentOpenGLCameraMatrixModified(cv::Mat &Tcp, pangolin::OpenGlMatrix &M){
+
+	// Obtener la rotación y traslación de la pose invertida y producir Twc
+	cv::Mat Rwc, twc, Twc = cv::Mat::zeros(4,4,CV_32F);
+    {
+        unique_lock<mutex> lock(mMutexCamera);
+        Rwc = mCameraPose.rowRange(0,3).colRange(0,3).t();
+        twc = -Rwc * mCameraPose.rowRange(0,3).col(3);
+    }
+    Rwc.copyTo(Twc.rowRange(0,3).colRange(0,3));
+    twc.copyTo(Twc.rowRange(0,3).col(3));
+
+    // Modificar, transformar Twc
+    cv::Mat Twp = Twc * Tcp;
+
+	// Convertir a matriz opengl
+    for(unsigned int i=0; i<4; i++)
+		for(unsigned int j=0; j<4; j++)
+		    M.m[j+i*4] = Twp.at<float>(j,i);
+}
+
 
 } //namespace ORB_SLAM
